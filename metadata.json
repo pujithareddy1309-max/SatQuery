@@ -1,0 +1,6 @@
+{
+  "name": "SatQuery AI",
+  "description": "Remote-sensing vision-language assistant with real-time Gemini 3.8 Live voice conversations, Sentinel-2 indices, pixel-level segmentation, semantic change, optical-SAR fusion, and geospatial export.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

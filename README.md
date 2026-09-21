@@ -1,66 +1,30 @@
-# SatQuery AI — Remote-sensing vision-language assistant
+# SatQuery AI — Remote-Sensing Vision-Language Assistant
 
-Agentic optical/SAR analysis: Sentinel-2 indices, pixel-level coverage, semantic change, spatial validation, and geospatial export.
+Autonomous remote-sensing assistant for Sentinel-2 indices, pixel-level coverage, semantic change, optical-SAR fusion, and geospatial vector export.
 
-## Setup
+## Features
 
-```
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
+- **Sentinel-2 Indices**: NDVI (Vegetation), NDWI (Water), and NDBI (Built-up) with colormaps and coverage statistics.
+- **Pixel-Level Segmentation**: Morphologically cleaned masks for water bodies, vegetation canopies, and built-up infrastructure.
+- **Bi-Temporal Semantic Change**: Classifies flooding inundation, deforestation, construction, and crop evolution between acquisitions.
+- **Optical–SAR Fusion**: Speckle-filtered Sentinel-1 radar backscatter fused with Sentinel-2 optical bands.
+- **Pre-flight Spatial Validation**: CRS consistency, bounding box spatial overlap calculation, and acquisition delta verification.
+- **GIS Export**: Standard GeoJSON FeatureCollection, Google Earth KML, and full `.zip` bundle with area metrics in hectares (10m Sentinel-2 GSD).
+- **Autonomous Tool Execution Trace**: Structured planner logging intermediate tool invocations, parameters, and confidence scores.
 
-## Run
+## Operational Templates
 
-```
-python app.py
-```
+- **Flood Risk**: NDWI t1/t2, inundation expansion mapping, and affected area in hectares.
+- **Land Cover**: Water, vegetation canopy, and urban built-up spectral segmentation.
+- **Change Detection**: Multi-class bi-temporal deforestation, construction, and flood changes.
+- **Agriculture**: NDVI anomaly and vegetation vigor loss/gain tracking.
+- **Optical–SAR Fusion**: Cross-modal microwave radar and optical composite.
 
-Optional:
+## Development & Build
 
-| Variable | Effect |
-| --- | --- |
-| `SATQUERY_LLM_API_KEY` / `OPENAI_API_KEY` | LLM function-calling planner |
-| `SATQUERY_ENABLE_VLM=1` | Qwen2-VL for free-form multi-image VQA |
-| `SATQUERY_ENABLE_CLIP=1` | Frozen CLIP optical encoder (else lightweight CNN) |
-| `SATQUERY_ENABLE_SAM=1` | Optional SAM masks |
-| `SATQUERY_SHARE=1` | Gradio public link |
-
-## Architecture
-
-```
-satquery/
-  indices.py        NDVI, NDWI, NDBI (S2 bands or RGB proxy)
-  raster.py         MSI ingest, SCL/QA cloud mask
-  validation.py     CRS, overlap, dates, cloud pre-flight
-  fusion.py         frozen optical encoder + Lee SAR + cross-attention
-  segmentation.py   pixel masks + coverage % (spectral / GrabCut / optional SAM)
-  change.py         flood, deforestation, construction, crop evolution
-  geoexport.py      GeoJSON, KML, shapefile, GeoTIFF masks, hectares
-  agent.py          tool registry + autonomous call loop
+```bash
+npm install
+npm run dev
+npm run build
 ```
 
-Tools the agent can call: `calculate_ndvi`, `calculate_ndwi`, `calculate_ndbi`, `run_segmentation`, `validate_spatial_extent`, `export_geojson`, plus semantic change, NDVI anomaly, optical–SAR fusion, VQA, captioning, grounding.
-
-## Operational templates (UI buttons)
-
-- **Flood Risk** — NDWI t1/t2, flood class, area in ha, export
-- **Land Cover** — water / vegetation / built-up coverage
-- **Change Detection** — semantic change classes
-- **Agriculture** — NDVI anomaly tracking
-- **Optical–SAR Fusion** — speckle-aware SAR + optical cross-attention
-
-PNG/JPEG uploads use an assumed 10 m GSD for area. Real Sentinel-2 GeoTIFFs (B02–B11 descriptions, EPSG) drive CRS-aware hectares and vector export.
-
-## Tests
-
-```
-python test_router.py
-python test_rs.py
-```
-
-## Adaptation proof (optional)
-
-```
-python finetune_adaptation.py
-```
