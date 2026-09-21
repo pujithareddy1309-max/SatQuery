@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.python-version
+satquery_rs_adapter/
+adaptation_proof.json
+adaptation_loss.npy
+assets/samples/
+outputs/
+.gradio/
+hf_cache/
