@@ -9,3 +9,4 @@ assets/samples/
 outputs/
 .gradio/
 hf_cache/
+.env
