@@ -1,14 +1,24 @@
 import React from 'react';
-import { Satellite, Layers, Droplets, TreePine, RefreshCw, Cpu, Radio, Compass } from 'lucide-react';
+import { Satellite, Layers, Droplets, TreePine, RefreshCw, Cpu, Radio, Compass, Globe2, FileSpreadsheet } from 'lucide-react';
 import { OperationalTemplate } from '../types';
 
 interface HeaderProps {
   onSelectPreset: (presetName: string) => void;
   activeTemplate: OperationalTemplate;
   onStartTour?: () => void;
+  isGalaxyCollapsed?: boolean;
+  onToggleGalaxy?: () => void;
+  onOpenBatchProcessing?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ onSelectPreset, activeTemplate, onStartTour }) => {
+export const Header: React.FC<HeaderProps> = ({
+  onSelectPreset,
+  activeTemplate,
+  onStartTour,
+  isGalaxyCollapsed,
+  onToggleGalaxy,
+  onOpenBatchProcessing,
+}) => {
   const presets = [
     { name: 'Flood Risk', icon: Droplets, desc: 'NDWI t1/t2 & flood area' },
     { name: 'Land Cover', icon: Layers, desc: 'Water / vegetation / built-up' },
@@ -41,6 +51,23 @@ export const Header: React.FC<HeaderProps> = ({ onSelectPreset, activeTemplate, 
 
         {/* Runtime info badges & Floating Take Tour Button */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          {onToggleGalaxy && (
+            <button
+              type="button"
+              id="toggle-galaxy-hero-btn"
+              onClick={onToggleGalaxy}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold shadow-md transition-all cursor-pointer ${
+                !isGalaxyCollapsed
+                  ? 'bg-cyan-500/25 border-cyan-400/60 text-cyan-300 ring-1 ring-cyan-400/50'
+                  : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700 text-slate-300 hover:text-white'
+              }`}
+              title={isGalaxyCollapsed ? 'Expand full-screen 3D Galaxy Orbit view' : 'Collapse 3D Galaxy Orbit view'}
+            >
+              <Globe2 className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+              <span>{isGalaxyCollapsed ? 'Orbit 3D View' : 'Close 3D View'}</span>
+            </button>
+          )}
+
           {onStartTour && (
             <button
               type="button"
@@ -51,6 +78,19 @@ export const Header: React.FC<HeaderProps> = ({ onSelectPreset, activeTemplate, 
             >
               <Compass className="w-3.5 h-3.5 text-emerald-400" />
               <span>Take Tour</span>
+            </button>
+          )}
+
+          {onOpenBatchProcessing && (
+            <button
+              type="button"
+              id="open-batch-processing-btn"
+              onClick={onOpenBatchProcessing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-r from-emerald-600/30 to-teal-600/30 hover:from-emerald-600/50 hover:to-teal-600/50 border border-emerald-500/50 text-emerald-200 text-xs font-semibold shadow-md shadow-emerald-950/40 hover:scale-105 active:scale-95 transition-all cursor-pointer ring-1 ring-emerald-400/40"
+              title="Upload CSV of multiple coordinates for automated bi-temporal change detection and JSON export"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Batch Pipeline (CSV)</span>
             </button>
           )}
 

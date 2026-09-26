@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Eye, Layers, Sliders, Activity, Maximize2, Minimize2, Crosshair, Split, X } from 'lucide-react';
+import { Eye, Layers, Sliders, Activity, Maximize2, Minimize2, Crosshair, Split, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { AgentResult, OperationalTemplate, RasterScene } from '../types';
 import { renderAnnotatedImage, COLOR_MAP } from '../satquery/segmentation';
 import { SemanticLegend } from './SemanticLegend';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface VisualEvidenceProps {
   result: AgentResult | null;
@@ -37,6 +38,7 @@ export const VisualEvidence: React.FC<VisualEvidenceProps> = ({
   const [blendMode, setBlendMode] = useState<'opacity' | 'swipe'>('swipe');
   const [swipePosition, setSwipePosition] = useState<number>(50);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
 
   useEffect(() => {
     setBlendValue(opacity);
@@ -113,7 +115,7 @@ export const VisualEvidence: React.FC<VisualEvidenceProps> = ({
 
   if (!result) {
     return (
-      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-8 text-center text-slate-500 shadow-sm">
+      <div id="visual-evidence-container" className="bg-slate-900/80 border border-slate-800 rounded-xl p-8 text-center text-slate-500 shadow-sm">
         <Activity className="w-10 h-10 mx-auto text-slate-600 mb-3" />
         <h3 className="text-sm font-semibold text-slate-400">No Visual Evidence Generated Yet</h3>
         <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
@@ -126,7 +128,7 @@ export const VisualEvidence: React.FC<VisualEvidenceProps> = ({
   const availableClasses = Object.keys(result.masks);
 
   return (
-    <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+    <div id="visual-evidence-container" className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
       {/* Header Tabs */}
       <div className="border-b border-slate-800 bg-slate-950/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-1.5">
@@ -169,33 +171,80 @@ export const VisualEvidence: React.FC<VisualEvidenceProps> = ({
           </button>
         </div>
 
-        {/* Global toggles for evidence tab */}
-        {activeTab === 'evidence' && (
-          <div className="flex items-center gap-3 text-xs">
-            <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showMasks}
-                onChange={(e) => setShowMasks(e.target.checked)}
-                className="rounded border-slate-700 text-emerald-500 bg-slate-800"
-              />
-              <span>Masks</span>
-            </label>
-            <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showBoxes}
-                onChange={(e) => setShowBoxes(e.target.checked)}
-                className="rounded border-slate-700 text-emerald-500 bg-slate-800"
-              />
-              <span>Boxes</span>
-            </label>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {/* Global toggles for evidence tab */}
+          {activeTab === 'evidence' && !isCollapsed && (
+            <div className="flex items-center gap-3 text-xs">
+              <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showMasks}
+                  onChange={(e) => setShowMasks(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 bg-slate-800"
+                />
+                <span>Masks</span>
+              </label>
+              <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showBoxes}
+                  onChange={(e) => setShowBoxes(e.target.checked)}
+                  className="rounded border-slate-700 text-emerald-500 bg-slate-800"
+                />
+                <span>Boxes</span>
+              </label>
+            </div>
+          )}
+
+          {/* Chevron Collapse Toggle (keyboard_arrow_up / keyboard_arrow_down) */}
+          <button
+            type="button"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            aria-expanded={!isCollapsed}
+            className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+              isCollapsed
+                ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-emerald-400'
+                : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/80 text-slate-400 hover:text-white'
+            }`}
+            title={
+              isCollapsed
+                ? 'Expand visual evidence (keyboard_arrow_down)'
+                : 'Collapse visual evidence (keyboard_arrow_up)'
+            }
+          >
+            {isCollapsed ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronUp className="w-4 h-4" />
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* Main Tab Content */}
-      <div className="p-4">
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{
+              height: 'auto',
+              opacity: 1,
+              transition: {
+                height: { duration: 0.28, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.2, ease: 'easeOut' },
+              },
+            }}
+            exit={{
+              height: 0,
+              opacity: 0,
+              transition: {
+                height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.15, ease: 'easeIn' },
+              },
+            }}
+            className="overflow-hidden"
+          >
+            {/* Main Tab Content */}
+            <div className="p-4">
         {activeTab === 'evidence' && (
           <div>
             {/* Visual Canvas Container with Real-Time Pixel Inspector */}
@@ -528,6 +577,9 @@ export const VisualEvidence: React.FC<VisualEvidenceProps> = ({
           </div>
         )}
       </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Fullscreen High-Resolution Inspection Modal */}
       {isFullscreen && (

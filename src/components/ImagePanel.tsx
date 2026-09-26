@@ -1,8 +1,9 @@
 import React, { useRef } from 'react';
-import { Upload, Calendar, Cloud, Globe, Sparkles, Radio } from 'lucide-react';
+import { Upload, Calendar, Cloud, Globe, Sparkles, Radio, Eye } from 'lucide-react';
 import { RasterScene } from '../types';
 import { extractBandsFromRgba } from '../satquery/indices';
 import { generateDemoScene, sceneToDataUrl } from '../satquery/demo';
+import { CollapsibleCard } from './CollapsibleCard';
 
 interface ImagePanelProps {
   scene1: RasterScene;
@@ -101,8 +102,34 @@ export const ImagePanel: React.FC<ImagePanelProps> = ({
   const scene2Url = scene2 ? sceneToDataUrl(scene2) : null;
 
   return (
-    <div id="image-panels-container" className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {/* Scene 1 Card */}
+    <CollapsibleCard
+      id="image-panels-container"
+      title="Dual-Scene Satellite Imagery"
+      subtitle="Sentinel-2 MSI optical (T1), temporal post-event (T2), and Sentinel-1 SAR microwave radar pairs"
+      icon={Eye}
+      iconColor="text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+      badge={
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 font-mono text-emerald-300">
+            T1: {scene1.width}×{scene1.height}px
+          </span>
+          {scene2 && (
+            <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 font-mono text-cyan-300">
+              T2: {isSar ? 'SAR C-Band' : 'Optical'}
+            </span>
+          )}
+        </div>
+      }
+      collapsedSummary={
+        <span className="text-slate-400 text-xs">
+          Scene 1: {scene1.crs || 'EPSG:32633'} ({scene1.acquisitionDate || '2024-04-01'})
+          {scene2 ? ` · Scene 2: ${isSar ? 'Sentinel-1 SAR' : 'Sentinel-2 MSI'}` : ''}
+        </span>
+      }
+      bodyClassName="p-4"
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Scene 1 Card */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between shadow-sm">
         <div>
           <div className="flex items-center justify-between mb-3">
@@ -332,5 +359,6 @@ export const ImagePanel: React.FC<ImagePanelProps> = ({
         </div>
       </div>
     </div>
-  );
+  </CollapsibleCard>
+);
 };

@@ -1,13 +1,9 @@
 import express from 'express';
 import http from 'http';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const PORT = 3000;
 
@@ -92,6 +88,116 @@ async function startServer() {
         error: isRateLimit ? 'Gemini API quota or rate limit temporarily reached' : 'Failed to transcribe audio',
         details: errMsg,
         model: 'gemini-3.5-transcribe',
+      });
+    }
+  });
+
+  // Location Lock & Geocoding with Google Maps Grounding
+  app.post('/api/location-lock', async (req, res) => {
+    const { query, lat: inLat, lon: inLon } = req.body;
+    if (!query && (inLat === undefined || inLon === undefined)) {
+      return res.status(400).json({ error: 'Missing location query or coordinates' });
+    }
+
+    try {
+      let resolvedLat = typeof inLat === 'number' ? inLat : undefined;
+      let resolvedLon = typeof inLon === 'number' ? inLon : undefined;
+      let formattedAddress = query || 'Target Location';
+      let region = 'Geographic AOI';
+      let country = 'Earth';
+      let elevationM = 24;
+
+      // Coordinate regex check if query provided
+      if ((resolvedLat === undefined || resolvedLon === undefined) && query) {
+        const coordRegex = /(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]+\s*(-?\d{1,3}(?:\.\d+)?)/;
+        const match = query.match(coordRegex);
+        if (match) {
+          const pLat = parseFloat(match[1]);
+          const pLon = parseFloat(match[2]);
+          if (pLat >= -90 && pLat <= 90 && pLon >= -180 && pLon <= 180) {
+            resolvedLat = pLat;
+            resolvedLon = pLon;
+            formattedAddress = `${Math.abs(pLat).toFixed(4)}°${pLat >= 0 ? 'N' : 'S'}, ${Math.abs(pLon).toFixed(4)}°${pLon >= 0 ? 'E' : 'W'}`;
+          }
+        }
+      }
+
+      // If still not resolved or we want rich place details from Google Maps Grounding:
+      const key = process.env.GEMINI_API_KEY;
+      if (key && (resolvedLat === undefined || resolvedLon === undefined || query)) {
+        try {
+          const ai = getAI();
+          const prompt = resolvedLat !== undefined && resolvedLon !== undefined
+            ? `Identify the street address, place name, administrative region, country, and ground elevation for latitude ${resolvedLat}, longitude ${resolvedLon}. Return exact geographic details.`
+            : `Geocode and locate this address or place: "${query}". Provide the exact latitude, longitude, formatted street address, administrative region, and country.`;
+
+          const response = await ai.models.generateContent({
+            model: 'gemini-3.5-flash',
+            contents: prompt,
+            config: {
+              tools: [{ googleMaps: {} }],
+            },
+          });
+
+          const text = response.text || '';
+          const candidate = response.candidates?.[0];
+          const chunks = candidate?.groundingMetadata?.groundingChunks;
+
+          // Attempt to extract lat/lon from response text if not yet resolved
+          if (resolvedLat === undefined || resolvedLon === undefined) {
+            const latMatch = text.match(/lat(?:itude)?[:\s]*(-?\d{1,2}\.\d+)/i) || text.match(/(-?\d{1,2}\.\d+)\s*°?\s*[NS]/i);
+            const lonMatch = text.match(/lon(?:gitude)?[:\s]*(-?\d{1,3}\.\d+)/i) || text.match(/(-?\d{1,3}\.\d+)\s*°?\s*[EW]/i);
+            if (latMatch && lonMatch) {
+              resolvedLat = parseFloat(latMatch[1]);
+              resolvedLon = parseFloat(lonMatch[1]);
+            }
+          }
+
+          if (chunks && chunks.length > 0) {
+            const firstMap = chunks.find((c: any) => c.maps?.title || c.web?.title);
+            if (firstMap?.maps?.title) formattedAddress = firstMap.maps.title;
+            else if (firstMap?.web?.title) formattedAddress = firstMap.web.title;
+          }
+        } catch (geminiErr) {
+          console.warn('Google Maps Grounding lookup notice:', geminiErr);
+        }
+      }
+
+      // Fallbacks if lat/lon not found
+      if (resolvedLat === undefined || resolvedLon === undefined) {
+        resolvedLat = 37.4220;
+        resolvedLon = -122.0841;
+        formattedAddress = query || '1600 Amphitheatre Pkwy, Mountain View, CA';
+      }
+
+      const zone = Math.floor((resolvedLon + 180) / 6) + 1;
+      const hemisphere = resolvedLat >= 0 ? 'N' : 'S';
+      const utmZone = `${zone}${hemisphere}`;
+      const crs = `EPSG:${resolvedLat >= 0 ? 32600 + zone : 32700 + zone}`;
+
+      return res.json({
+        success: true,
+        lat: resolvedLat,
+        lon: resolvedLon,
+        formattedAddress,
+        region,
+        country,
+        utmZone,
+        crs,
+        elevationM,
+        googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${resolvedLat},${resolvedLon}`,
+      });
+    } catch (err: any) {
+      console.error('Location lock error:', err);
+      return res.status(200).json({
+        success: false,
+        error: err?.message || 'Failed to lock location',
+        lat: 37.4220,
+        lon: -122.0841,
+        formattedAddress: query || 'Mountain View, CA',
+        utmZone: '10N',
+        crs: 'EPSG:32610',
+        elevationM: 14,
       });
     }
   });

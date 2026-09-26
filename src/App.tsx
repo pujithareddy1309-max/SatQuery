@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
+import { GalaxyHero } from './components/GalaxyHero';
 import { ImagePanel } from './components/ImagePanel';
 import { Controls } from './components/Controls';
 import { VisualEvidence } from './components/VisualEvidence';
@@ -7,8 +8,11 @@ import { AudioExplanation } from './components/AudioExplanation';
 import { LiveVoiceConversation } from './components/LiveVoiceConversation';
 import { FindingsExport } from './components/FindingsExport';
 import { ExecutionTrace } from './components/ExecutionTrace';
-import { AgentResult, OperationalTemplate, RasterScene } from './types';
-import { generateDemoScene } from './satquery/demo';
+import { AppTour } from './components/AppTour';
+import { BatchProcessingModal } from './components/BatchProcessingModal';
+import { BatchProcessingCard } from './components/BatchProcessingCard';
+import { AgentResult, OperationalTemplate, RasterScene, LocationLockData } from './types';
+import { generateDemoScene, generateBiTemporalLocationScenes } from './satquery/demo';
 import { runAgent } from './satquery/agent';
 
 export const App: React.FC = () => {
@@ -27,6 +31,10 @@ export const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [groundingType, setGroundingType] = useState<'none' | 'search' | 'maps'>('none');
   const [isGroundingLoading, setIsGroundingLoading] = useState(false);
+  const [isTourOpen, setIsTourOpen] = useState(false);
+  const [isGalaxyCollapsed, setIsGalaxyCollapsed] = useState(false);
+  const [activeLocationLock, setActiveLocationLock] = useState<LocationLockData | null>(null);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
 
   // Helper to fetch grounding from server
   const fetchGrounding = async (
@@ -200,9 +208,116 @@ export const App: React.FC = () => {
     }
   };
 
+  // Handler for Location Lock and Bi-Temporal Change Detection execution
+  const handleExecuteLocationBiTemporal = (
+    loc: LocationLockData,
+    t1Date: string,
+    t2Date: string,
+    layer: 'google-maps' | 'osiris-optical' | 'osiris-sar' | 'osiris-ndwi',
+    targetTemplate: OperationalTemplate
+  ) => {
+    setActiveLocationLock(loc);
+    const sarEnabled = layer === 'osiris-sar';
+    setIsSar(sarEnabled);
+    setTemplate(targetTemplate);
+
+    // Generate co-registered bi-temporal scenes with realistic temporal delta
+    const { scene1: s1, scene2: s2 } = generateBiTemporalLocationScenes(
+      loc.lat,
+      loc.lon,
+      loc.formattedAddress,
+      t1Date,
+      t2Date,
+      layer
+    );
+
+    setScene1(s1);
+    setScene2(s2);
+    setSample1Key('custom');
+    setSample2Key('custom');
+
+    const locQuery = `Bi-temporal change detection at ${loc.formattedAddress} (Coordinates: ${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)}, CRS: ${loc.crs}) between baseline ${t1Date} (T1) and comparison ${t2Date} (T2) using Google Maps / OSIRIS data layers.`;
+    setQuery(locQuery);
+
+    // Auto-switch grounding to Maps
+    setGroundingType('maps');
+
+    // Run remote sensing pipeline with newly locked scenes
+    executePipeline(s1, s2, sarEnabled, locQuery, targetTemplate, 'maps');
+
+    // Smooth scroll down to visual evidence
+    setTimeout(() => {
+      const el = document.getElementById('visual-evidence-container');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    }, 400);
+  };
+
+  // Handler when inspecting a completed batch item in the main dashboard
+  const handleInspectBatchItem = (
+    s1: RasterScene,
+    s2: RasterScene,
+    batchQuery: string,
+    batchTemplate: OperationalTemplate,
+    locationName: string
+  ) => {
+    setScene1(s1);
+    setScene2(s2);
+    setQuery(batchQuery);
+    setTemplate(batchTemplate);
+    setSample1Key('custom');
+    setSample2Key('custom');
+    setIsSar(s2.isSar || false);
+
+    // Run agent pipeline for this scene pair in main dashboard
+    executePipeline(s1, s2, s2.isSar || false, batchQuery, batchTemplate, groundingType);
+
+    // Smooth scroll down to visual evidence
+    setTimeout(() => {
+      const el = document.getElementById('visual-evidence-container');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    }, 400);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      <Header onSelectPreset={handleSelectPreset} activeTemplate={template} />
+      {/* Astra-Style 3D Three.js Galaxy Hero with Orbiting Earth & Starfield */}
+      <GalaxyHero
+        onSelectPreset={handleSelectPreset}
+        onStartTour={() => {
+          setIsGalaxyCollapsed(true);
+          setIsTourOpen(true);
+        }}
+        isCollapsed={isGalaxyCollapsed}
+        onToggleCollapse={() => {
+          setIsGalaxyCollapsed((prev) => {
+            const next = !prev;
+            if (!next) {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            return next;
+          });
+        }}
+      />
+
+      <Header
+        onSelectPreset={handleSelectPreset}
+        activeTemplate={template}
+        onStartTour={() => {
+          setIsGalaxyCollapsed(true);
+          setIsTourOpen(true);
+        }}
+        isGalaxyCollapsed={isGalaxyCollapsed}
+        onToggleGalaxy={() => {
+          setIsGalaxyCollapsed((prev) => {
+            const next = !prev;
+            if (!next) {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            return next;
+          });
+        }}
+        onOpenBatchProcessing={() => setIsBatchModalOpen(true)}
+      />
 
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 lg:p-8 space-y-6">
         {/* Top Section: Imagery & Controls */}
@@ -234,17 +349,28 @@ export const App: React.FC = () => {
             onGroundingTypeChange={setGroundingType}
             onFetchGrounding={handleManualGrounding}
             isGroundingLoading={isGroundingLoading}
+            onOpenBatchProcessing={() => setIsBatchModalOpen(true)}
+            onLocationLock={setActiveLocationLock}
+          />
+
+          {/* Batch Coordinate Bi-Temporal Processing Card */}
+          <BatchProcessingCard
+            onInspectItemInDashboard={handleInspectBatchItem}
+            onOpenModal={() => setIsBatchModalOpen(true)}
           />
         </div>
 
         {/* Results Section */}
         <div className="space-y-6">
-          {/* Real-time Voice Conversation with Gemini 3.8 Live */}
+          {/* Real-time Voice Conversation with Gemini 3.8 Live & Location Interception */}
           <LiveVoiceConversation
             result={result}
             scene1={scene1}
             scene2={scene2}
             query={query}
+            onExecuteBiTemporal={handleExecuteLocationBiTemporal}
+            activeLocationLock={activeLocationLock}
+            onLocationLockChange={setActiveLocationLock}
           />
 
           <VisualEvidence
@@ -256,14 +382,12 @@ export const App: React.FC = () => {
           />
 
           {/* Audio Explanation with Language and Jargon/Simple Options */}
-          {result && (
-            <AudioExplanation
-              result={result}
-              scene1={scene1}
-              scene2={scene2}
-              query={query}
-            />
-          )}
+          <AudioExplanation
+            result={result}
+            scene1={scene1}
+            scene2={scene2}
+            query={query}
+          />
 
           <FindingsExport
             result={result}
@@ -274,6 +398,20 @@ export const App: React.FC = () => {
           <ExecutionTrace trace={result?.trace || null} />
         </div>
       </main>
+
+      {/* App Guided Tour Modal */}
+      <AppTour
+        isOpen={isTourOpen}
+        onClose={() => setIsTourOpen(false)}
+        onSelectPreset={handleSelectPreset}
+      />
+
+      {/* Batch Processing Fullscreen Modal */}
+      <BatchProcessingModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        onInspectItemInDashboard={handleInspectBatchItem}
+      />
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950/80 py-4 px-6 text-center text-xs text-slate-500">

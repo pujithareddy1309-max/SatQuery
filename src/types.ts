@@ -153,3 +153,108 @@ export interface PresetConfig {
   sample2?: string;
   description: string;
 }
+
+export interface OsirisMetadata {
+  satelliteConstellation: string;
+  orbitRepeatDays: number;
+  sensorModes: string[];
+  recommendedWindows: Array<{ t1: string; t2: string; label: string }>;
+}
+
+export interface LocationLockData {
+  id: string;
+  query: string;
+  lat: number;
+  lon: number;
+  formattedAddress: string;
+  region?: string;
+  country?: string;
+  crs: string;
+  utmZone: string;
+  mgrs: string;
+  elevationM: number;
+  bounds: [number, number, number, number]; // [minLon, minLat, maxLon, maxLat]
+  googleMapsUrl: string;
+  osiris: OsirisMetadata;
+  t1Date: string;
+  t2Date: string;
+  selectedLayer: 'google-maps' | 'osiris-optical' | 'osiris-sar' | 'osiris-ndwi';
+}
+
+export interface BatchCoordinateItem {
+  id: string;
+  lat: number;
+  lon: number;
+  name: string;
+  t1Date: string;
+  t2Date: string;
+  layer: 'osiris-optical' | 'osiris-sar' | 'osiris-ndwi' | 'google-maps';
+  template: OperationalTemplate;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  error?: string;
+  result?: BatchItemResult;
+  scene1?: RasterScene;
+  scene2?: RasterScene;
+}
+
+export interface BatchItemResult {
+  id: string;
+  locationName: string;
+  lat: number;
+  lon: number;
+  formattedAddress: string;
+  crs: string;
+  utmZone: string;
+  mgrs: string;
+  elevationM: number;
+  bounds: [number, number, number, number];
+  t1Date: string;
+  t2Date: string;
+  daysDelta: number;
+  layerUsed: string;
+  dominantChange: string;
+  confidence: number;
+  headline: string;
+  agentSummary: string;
+  spectralDeltas: {
+    meanDeltaNdvi: number;
+    meanDeltaNdwi: number;
+    meanDeltaNdbi: number;
+  };
+  coverageChanges: Array<{
+    className: string;
+    scene1Pct: number;
+    scene2Pct: number;
+    deltaPct: number;
+    deltaHectares: number;
+    direction: 'increase' | 'decrease' | 'stable';
+    interpretation: string;
+  }>;
+  totalHectares: number;
+  processingTimeMs: number;
+  googleMapsUrl: string;
+}
+
+export interface BatchSummaryExport {
+  exportVersion: string;
+  exportTimestamp: string;
+  batchId: string;
+  metadata: {
+    totalItems: number;
+    completedItems: number;
+    failedItems: number;
+    elapsedSeconds: number;
+    pipeline: string;
+    satelliteConstellation: string;
+    spatialResolutionM: number;
+    aggregateAnalysis: {
+      totalHectaresAnalyzed: number;
+      averageDaysDelta: number;
+      dominantChangesCount: Record<string, number>;
+      netVegetationShiftHectares: number;
+      netWaterShiftHectares: number;
+      netBuiltUpShiftHectares: number;
+    };
+  };
+  results: BatchItemResult[];
+}

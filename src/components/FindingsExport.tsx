@@ -18,7 +18,10 @@ import {
   Compass,
   ExternalLink,
   Volume2,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { AgentResult, RasterScene } from '../types';
 import { calculateCoverageTrend, BiTemporalTrendSummary } from '../satquery/trend';
 
@@ -36,6 +39,7 @@ export const FindingsExport: React.FC<FindingsExportProps> = ({
   const [copiedAnswer, setCopiedAnswer] = useState(false);
   const [copiedTrend, setCopiedTrend] = useState(false);
   const [isZipping, setIsZipping] = useState(false);
+  const [isAnswerCollapsed, setIsAnswerCollapsed] = useState(false);
 
   // Compute trend summary when multiple scenes are present
   const trendSummary: BiTemporalTrendSummary | null = useMemo(() => {
@@ -43,7 +47,20 @@ export const FindingsExport: React.FC<FindingsExportProps> = ({
     return calculateCoverageTrend(scene1, scene2);
   }, [scene1, scene2]);
 
-  if (!result) return null;
+  if (!result) {
+    return (
+      <div
+        id="findings-export-container"
+        className="bg-slate-900/80 border border-slate-800 rounded-xl p-8 text-center text-slate-500 shadow-sm"
+      >
+        <FileSpreadsheet className="w-10 h-10 mx-auto text-slate-600 mb-3" />
+        <h3 className="text-sm font-semibold text-slate-400">Analytical Findings & GeoJSON Export</h3>
+        <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+          Execute a query to inspect class breakdown, bi-temporal trend comparisons, hectare statistics, and GIS exports (GeoJSON, CSV, ZIP bundle).
+        </p>
+      </div>
+    );
+  }
 
   const handleCopyAnswer = () => {
     navigator.clipboard.writeText(result.answer);
@@ -134,7 +151,7 @@ export const FindingsExport: React.FC<FindingsExportProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div id="findings-export-container" className="space-y-4">
       {/* Findings / Agent Answer */}
       <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-sm">
         <div className="flex items-center justify-between mb-3">
@@ -178,12 +195,60 @@ export const FindingsExport: React.FC<FindingsExportProps> = ({
                 </>
               )}
             </button>
+
+            {/* Chevron Collapse Toggle (keyboard_arrow_up / keyboard_arrow_down) */}
+            <button
+              type="button"
+              onClick={() => setIsAnswerCollapsed(!isAnswerCollapsed)}
+              aria-expanded={!isAnswerCollapsed}
+              className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+                isAnswerCollapsed
+                  ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-emerald-400'
+                  : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/80 text-slate-400 hover:text-white'
+              }`}
+              title={
+                isAnswerCollapsed
+                  ? 'Expand agent answer (keyboard_arrow_down)'
+                  : 'Collapse agent answer (keyboard_arrow_up)'
+              }
+            >
+              {isAnswerCollapsed ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronUp className="w-4 h-4" />
+              )}
+            </button>
           </div>
         </div>
 
-        <div className="p-4 rounded-lg bg-slate-950/80 border border-slate-800/80 text-sm text-slate-200 leading-relaxed whitespace-pre-line font-sans selection:bg-emerald-500/20">
-          {result.answer}
-        </div>
+        <AnimatePresence initial={false}>
+          {!isAnswerCollapsed && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{
+                height: 'auto',
+                opacity: 1,
+                transition: {
+                  height: { duration: 0.28, ease: [0.16, 1, 0.3, 1] },
+                  opacity: { duration: 0.2, ease: 'easeOut' },
+                },
+              }}
+              exit={{
+                height: 0,
+                opacity: 0,
+                transition: {
+                  height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+                  opacity: { duration: 0.15, ease: 'easeIn' },
+                },
+              }}
+              className="overflow-hidden"
+            >
+              <div className="p-4 rounded-lg bg-slate-950/80 border border-slate-800/80 text-sm text-slate-200 leading-relaxed whitespace-pre-line font-sans selection:bg-emerald-500/20">
+                {result.answer}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Grounded Geospatial & Real-World Evidence (gemini-3.5-flash with Google Search / Google Maps) */}

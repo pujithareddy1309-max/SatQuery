@@ -14,8 +14,11 @@ import {
   CheckCircle2,
   X,
   CornerDownLeft,
+  FileSpreadsheet,
 } from 'lucide-react';
-import { OperationalTemplate } from '../types';
+import { OperationalTemplate, LocationLockData } from '../types';
+import { CollapsibleCard } from './CollapsibleCard';
+import { detectLocationString, resolveLocationLock } from '../satquery/geocoder';
 
 interface ControlsProps {
   template: OperationalTemplate;
@@ -31,6 +34,8 @@ interface ControlsProps {
   onGroundingTypeChange: (type: 'none' | 'search' | 'maps') => void;
   onFetchGrounding: () => void;
   isGroundingLoading: boolean;
+  onOpenBatchProcessing?: () => void;
+  onLocationLock?: (loc: LocationLockData) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -47,6 +52,8 @@ export const Controls: React.FC<ControlsProps> = ({
   onGroundingTypeChange,
   onFetchGrounding,
   isGroundingLoading,
+  onOpenBatchProcessing,
+  onLocationLock,
 }) => {
   // Audio transcription state
   const [isRecording, setIsRecording] = useState(false);
@@ -209,7 +216,24 @@ export const Controls: React.FC<ControlsProps> = ({
   ];
 
   return (
-    <div id="controls-container" className="bg-slate-900/80 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
+    <CollapsibleCard
+      id="controls-container"
+      title="Query & Operational Controls"
+      subtitle="Operational templates, natural language prompts, speech transcription & geographic grounding"
+      icon={Sliders}
+      iconColor="text-emerald-400 bg-emerald-500/10 border-emerald-500/30"
+      badge={
+        <span className="px-2 py-0.5 text-[11px] font-semibold rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+          {templates.find((t) => t.id === template)?.label || template}
+        </span>
+      }
+      collapsedSummary={
+        <span className="text-slate-400 text-xs truncate max-w-lg">
+          Query: "{query}" · Grounding: {groundingType}
+        </span>
+      }
+      bodyClassName="p-5 space-y-4"
+    >
       {/* Template Radio Bar */}
       <div>
         <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
@@ -253,17 +277,36 @@ export const Controls: React.FC<ControlsProps> = ({
           <textarea
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                e.preventDefault();
-                if (!isLoading) {
-                  onRun();
+            onKeyDown={async (e) => {
+              if (e.key === 'Enter') {
+                const detected = detectLocationString(query);
+                if (detected && onLocationLock && !e.shiftKey) {
+                  e.preventDefault();
+                  try {
+                    const locData = await resolveLocationLock(query, { lat: detected.lat, lon: detected.lon });
+                    onLocationLock(locData);
+                    const el = document.getElementById('live-voice-conversation-card');
+                    if (el) {
+                      el.scrollIntoView({ behavior: 'smooth' });
+                      el.classList.add('ring-2', 'ring-emerald-500');
+                      setTimeout(() => el.classList.remove('ring-2', 'ring-emerald-500'), 1500);
+                    }
+                  } catch (err) {
+                    console.error('Failed to resolve location:', err);
+                  }
+                  return;
+                }
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault();
+                  if (!isLoading) {
+                    onRun();
+                  }
                 }
               }
             }}
             rows={2}
             className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-4 pr-32 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition resize-none font-sans"
-            placeholder="E.g., Segment water, vegetation, and built-up coverage, or compute flood extent... (Press ⌘+Enter to run)"
+            placeholder="Type a geospatial query, address (e.g. 1600 Amphitheatre Pkwy), or coordinates (e.g. 37.422, -122.084)..."
           />
 
           {/* Right Action Buttons: Clear & Mic Voice Input */}
@@ -339,6 +382,48 @@ export const Controls: React.FC<ControlsProps> = ({
             </button>
           ))}
         </div>
+
+        {/* Location Detected Callout */}
+        {detectLocationString(query) && (
+          <div className="mt-2 flex items-center justify-between text-xs bg-emerald-950/40 border border-emerald-500/40 rounded-xl p-3 text-emerald-300">
+            <div className="flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-emerald-500/20 text-emerald-400">
+                <MapPin className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-semibold text-white">Geographic Target Detected:</span>{' '}
+                <span className="text-emerald-300 font-mono">"{query}"</span>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Location lock acquired! Use the chat interface to preview Google Maps / OSIRIS layers and configure bi-temporal time periods.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                const detected = detectLocationString(query);
+                if (detected && onLocationLock) {
+                  try {
+                    const locData = await resolveLocationLock(query, { lat: detected.lat, lon: detected.lon });
+                    onLocationLock(locData);
+                  } catch (err) {
+                    console.error('Failed to resolve location:', err);
+                  }
+                }
+                const el = document.getElementById('live-voice-conversation-card');
+                if (el) {
+                  el.scrollIntoView({ behavior: 'smooth' });
+                  el.classList.add('ring-2', 'ring-emerald-500');
+                  setTimeout(() => el.classList.remove('ring-2', 'ring-emerald-500'), 1500);
+                }
+              }}
+              className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 rounded-lg text-xs font-semibold transition cursor-pointer shrink-0 ml-3 flex items-center gap-1.5"
+            >
+              <MapPin className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Lock Pin & Open in Chat ↵</span>
+            </button>
+          </div>
+        )}
 
         {/* Audio feedback notice */}
         {audioFeedback && (
@@ -464,13 +549,13 @@ export const Controls: React.FC<ControlsProps> = ({
         </div>
       </div>
 
-      {/* Run Button */}
-      <div className="pt-2">
+      {/* Run Button & Batch Pipeline Launcher */}
+      <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
         <button
           id="run-agent-btn"
           onClick={onRun}
           disabled={isLoading}
-          className="w-full flex items-center justify-center gap-2 py-3 px-6 rounded-xl font-semibold text-sm bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 transition shadow-lg shadow-emerald-950/40 cursor-pointer active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
+          className="flex-1 flex items-center justify-center gap-2 py-3 px-6 rounded-xl font-semibold text-sm bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 transition shadow-lg shadow-emerald-950/40 cursor-pointer active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {isLoading ? (
             <>
@@ -493,7 +578,19 @@ export const Controls: React.FC<ControlsProps> = ({
             </>
           )}
         </button>
+
+        {onOpenBatchProcessing && (
+          <button
+            type="button"
+            onClick={onOpenBatchProcessing}
+            className="flex items-center justify-center gap-2 py-3 px-5 rounded-xl font-semibold text-xs bg-slate-900 hover:bg-slate-800 text-emerald-300 border border-emerald-500/40 hover:border-emerald-500/60 shadow-md shadow-emerald-950/20 transition cursor-pointer active:scale-[0.99] shrink-0"
+            title="Upload CSV of multiple coordinates for automated bi-temporal change detection and JSON export"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+            <span>Batch CSV Pipeline</span>
+          </button>
+        )}
       </div>
-    </div>
+    </CollapsibleCard>
   );
 };

@@ -19,7 +19,10 @@ import {
   Download,
   FastForward,
   Rewind,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   AgentResult,
   ExplanationComplexity,
@@ -66,6 +69,7 @@ export const AudioExplanation: React.FC<AudioExplanationProps> = ({
   const [complexity, setComplexity] = useState<ExplanationComplexity>('simple');
   const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1.0);
+  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
 
   // Audio & Generation State
   const [isGenerating, setIsGenerating] = useState(false);
@@ -404,7 +408,7 @@ export const AudioExplanation: React.FC<AudioExplanationProps> = ({
           </div>
         </div>
 
-        {/* Quick Language & Jargon Status Badges */}
+        {/* Quick Language & Jargon Status Badges & Chevron Collapse Toggle */}
         <div className="flex items-center gap-2 flex-wrap">
           <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-800/90 text-slate-300 text-xs border border-slate-700">
             <span>{currentLangObj.flag}</span>
@@ -429,10 +433,55 @@ export const AudioExplanation: React.FC<AudioExplanationProps> = ({
               </>
             )}
           </span>
+
+          {/* Chevron Collapse Toggle (keyboard_arrow_up / keyboard_arrow_down) */}
+          <button
+            type="button"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            aria-expanded={!isCollapsed}
+            className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+              isCollapsed
+                ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-violet-400'
+                : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/80 text-slate-400 hover:text-white'
+            }`}
+            title={
+              isCollapsed
+                ? 'Expand audio explanation (keyboard_arrow_down)'
+                : 'Collapse audio explanation (keyboard_arrow_up)'
+            }
+          >
+            {isCollapsed ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronUp className="w-4 h-4" />
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Control Panel: Language Selector & Jargon / Style Option */}
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{
+              height: 'auto',
+              opacity: 1,
+              transition: {
+                height: { duration: 0.28, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.2, ease: 'easeOut' },
+              },
+            }}
+            exit={{
+              height: 0,
+              opacity: 0,
+              transition: {
+                height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.15, ease: 'easeIn' },
+              },
+            }}
+            className="overflow-hidden space-y-5"
+          >
+            {/* Control Panel: Language Selector & Jargon / Style Option */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800/80">
         {/* Language Selection */}
         <div className="space-y-2">
@@ -807,6 +856,9 @@ export const AudioExplanation: React.FC<AudioExplanationProps> = ({
           </div>
         </div>
       )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

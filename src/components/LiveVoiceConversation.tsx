@@ -21,14 +21,36 @@ import {
   Maximize2,
   Download,
   Keyboard,
+  Send,
+  MapPin,
+  Crosshair,
+  CornerDownLeft,
 } from 'lucide-react';
-import { AgentResult, RasterScene, ExplanationComplexity } from '../types';
+import {
+  AgentResult,
+  RasterScene,
+  ExplanationComplexity,
+  LocationLockData,
+  OperationalTemplate,
+} from '../types';
+import { motion, AnimatePresence } from 'framer-motion';
+import { detectLocationString, resolveLocationLock } from '../satquery/geocoder';
+import { LocationLockCard } from './LocationLockCard';
 
 interface LiveVoiceConversationProps {
   result: AgentResult | null;
   scene1: RasterScene;
   scene2: RasterScene | null;
   query: string;
+  onExecuteBiTemporal?: (
+    location: LocationLockData,
+    t1Date: string,
+    t2Date: string,
+    layer: 'google-maps' | 'osiris-optical' | 'osiris-sar' | 'osiris-ndwi',
+    template: OperationalTemplate
+  ) => void;
+  activeLocationLock?: LocationLockData | null;
+  onLocationLockChange?: (loc: LocationLockData | null) => void;
 }
 
 interface ChatTranscript {
@@ -36,6 +58,7 @@ interface ChatTranscript {
   role: 'user' | 'model' | 'system';
   text: string;
   timestamp: string;
+  locationLock?: LocationLockData;
 }
 
 const LIVE_VOICES = [
@@ -58,6 +81,9 @@ export const LiveVoiceConversation: React.FC<LiveVoiceConversationProps> = ({
   scene1,
   scene2,
   query,
+  onExecuteBiTemporal,
+  activeLocationLock,
+  onLocationLockChange,
 }) => {
   // Connection & Session State
   const [isConnected, setIsConnected] = useState(false);
@@ -70,6 +96,10 @@ export const LiveVoiceConversation: React.FC<LiveVoiceConversationProps> = ({
   const [transcripts, setTranscripts] = useState<ChatTranscript[]>([]);
   const [showFullTranscript, setShowFullTranscript] = useState(true);
   const [isDocked, setIsDocked] = useState(false);
+  const [isCardCollapsed, setIsCardCollapsed] = useState(false);
+  const [chatInputText, setChatInputText] = useState<string>('');
+  const [isResolvingLocation, setIsResolvingLocation] = useState<boolean>(false);
+  const [isExecutingBiTemporal, setIsExecutingBiTemporal] = useState<boolean>(false);
 
   // Configuration
   const [selectedVoice, setSelectedVoice] = useState<string>('Zephyr');
@@ -94,6 +124,29 @@ export const LiveVoiceConversation: React.FC<LiveVoiceConversationProps> = ({
   const currentModelTranscriptRef = useRef<string>('');
   const currentUserTranscriptRef = useRef<string>('');
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const lastActiveLocIdRef = useRef<string | null>(null);
+
+  // Auto-display confirmation pin & bi-temporal prompt if external activeLocationLock changes
+  useEffect(() => {
+    if (activeLocationLock && activeLocationLock.id !== lastActiveLocIdRef.current) {
+      lastActiveLocIdRef.current = activeLocationLock.id;
+      setIsCardCollapsed(false);
+      const alreadyHas = transcripts.some((t) => t.locationLock?.id === activeLocationLock.id);
+      if (!alreadyHas) {
+        const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setTranscripts((prev) => [
+          ...prev,
+          {
+            id: String(Date.now()),
+            role: 'model',
+            text: `📍 Target Location Confirmed & Pinned: ${activeLocationLock.formattedAddress} (${activeLocationLock.lat.toFixed(4)}°, ${activeLocationLock.lon.toFixed(4)}°).\n\nConfirmation pin placed. Please select or input your two time periods below for bi-temporal change detection (loading Sentinel-2 optical and Sentinel-1 SAR comparison rasters).`,
+            timestamp: nowTime,
+            locationLock: activeLocationLock,
+          },
+        ]);
+      }
+    }
+  }, [activeLocationLock]);
 
   // Spacebar keyboard shortcut for Quick Mute / Push-to-Talk
   useEffect(() => {
@@ -539,6 +592,74 @@ export const LiveVoiceConversation: React.FC<LiveVoiceConversationProps> = ({
     ]);
   };
 
+  // Intercept street addresses and coordinates or send text query to live session
+  const handleSendChatMessage = async (rawText: string) => {
+    const text = rawText.trim();
+    if (!text) return;
+
+    const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // 1. Intercept street address or coordinates string
+    const detected = detectLocationString(text);
+    if (detected) {
+      setIsCardCollapsed(false);
+      setTranscripts((prev) => [
+        ...prev,
+        {
+          id: String(Date.now()),
+          role: 'user',
+          text: `📍 Target Location: "${text}"`,
+          timestamp: nowTime,
+        },
+        {
+          id: String(Date.now() + 1),
+          role: 'system',
+          text: `🔒 Locking onto target location "${text}"... Resolving coordinates, UTM zone & Sentinel coverage.`,
+          timestamp: nowTime,
+        },
+      ]);
+
+      setIsResolvingLocation(true);
+      try {
+        const locData = await resolveLocationLock(text, { lat: detected.lat, lon: detected.lon });
+        setIsResolvingLocation(false);
+
+        // Add Model message containing the interactive LocationLockCard with Confirmation Pin
+        setTranscripts((prev) => [
+          ...prev,
+          {
+            id: String(Date.now() + 2),
+            role: 'model',
+            text: `📍 Target Location Confirmed & Pinned: **${locData.formattedAddress}** (${locData.lat.toFixed(4)}°, ${locData.lon.toFixed(4)}°).\n\nConfirmation pin placed. Please select or input your two time periods (T1 baseline and T2 comparison) below. We will retrieve co-registered **Sentinel-2 optical** and **Sentinel-1 SAR** comparison rasters to run bi-temporal change detection.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            locationLock: locData,
+          },
+        ]);
+
+        if (onLocationLockChange) {
+          onLocationLockChange(locData);
+        }
+
+        // If voice session is active, notify Gemini Live model so it speaks aloud
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(
+            JSON.stringify({
+              type: 'text',
+              text: `Target location confirmed and pinned at ${locData.formattedAddress}. Prompting user to select two time periods for bi-temporal change detection with Sentinel-2 optical and Sentinel-1 SAR comparison rasters.`,
+            })
+          );
+        }
+      } catch (err) {
+        setIsResolvingLocation(false);
+        console.error('Failed to resolve location lock:', err);
+      }
+      return;
+    }
+
+    // 2. Normal text message
+    handleSendPromptText(text);
+  };
+
   // Export full transcript as a downloadable text log
   const handleExportTranscript = () => {
     if (transcripts.length === 0) return;
@@ -744,13 +865,14 @@ export const LiveVoiceConversation: React.FC<LiveVoiceConversationProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Talk directly with Gemini Live in real-time. Discuss satellite imagery, ask questions,
-              and interrupt naturally.
+              {isCardCollapsed
+                ? `Voice: ${selectedVoice} · Session: ${isConnected ? 'Active Call' : 'Ready to Connect'} · Chat messages: ${transcripts.length}`
+                : 'Talk directly with Gemini Live in real-time. Discuss satellite imagery, ask questions, and interrupt naturally.'}
             </p>
           </div>
         </div>
 
-        {/* Live Call & Dock Controls */}
+        {/* Live Call, Dock Controls & Chevron Collapse Toggle */}
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -793,10 +915,55 @@ export const LiveVoiceConversation: React.FC<LiveVoiceConversationProps> = ({
               <span>End Call</span>
             </button>
           )}
+
+          {/* Sleek Chevron Arrow Collapse Toggle (keyboard_arrow_up / keyboard_arrow_down) */}
+          <button
+            type="button"
+            onClick={() => setIsCardCollapsed(!isCardCollapsed)}
+            aria-expanded={!isCardCollapsed}
+            className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
+              isCardCollapsed
+                ? 'bg-slate-800 hover:bg-slate-700 border-indigo-500/50 text-indigo-300 shadow-sm hover:scale-105'
+                : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700/80 text-slate-400 hover:text-white'
+            }`}
+            title={
+              isCardCollapsed
+                ? 'Expand AI chatbox (keyboard_arrow_down)'
+                : 'Collapse AI chatbox (keyboard_arrow_up)'
+            }
+          >
+            {isCardCollapsed ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronUp className="w-4 h-4" />
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Voice & Complexity Configuration Toolbar */}
+      <AnimatePresence initial={false}>
+        {!isCardCollapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{
+              height: 'auto',
+              opacity: 1,
+              transition: {
+                height: { duration: 0.28, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.2, ease: 'easeOut' },
+              },
+            }}
+            exit={{
+              height: 0,
+              opacity: 0,
+              transition: {
+                height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.15, ease: 'easeIn' },
+              },
+            }}
+            className="overflow-hidden space-y-5"
+          >
+            {/* Voice & Complexity Configuration Toolbar */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-950/70 p-3.5 rounded-xl border border-slate-800 text-xs">
         {/* Voice Selection */}
         <div className="space-y-1">
@@ -1068,53 +1235,160 @@ export const LiveVoiceConversation: React.FC<LiveVoiceConversationProps> = ({
         </div>
 
         {showFullTranscript && (
-          <div className="max-h-56 overflow-y-auto space-y-2.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
-            {transcripts.length === 0 ? (
-              <div className="text-center py-6 text-slate-500 space-y-1">
-                <Radio className="w-6 h-6 mx-auto text-slate-600 stroke-1" />
-                <p>No voice exchanges yet.</p>
-                <p className="text-[11px] text-slate-600">
-                  Click "Start Live Call" or pick a suggested question to converse with Gemini 3.8 Live.
-                </p>
-              </div>
-            ) : (
-              transcripts.map((t) => (
-                <div
-                  key={t.id}
-                  className={`flex flex-col ${
-                    t.role === 'user'
-                      ? 'items-end'
-                      : t.role === 'model'
-                      ? 'items-start'
-                      : 'items-center'
-                  }`}
-                >
-                  {t.role === 'system' ? (
-                    <span className="text-[11px] text-slate-500 italic bg-slate-900/60 px-2 py-0.5 rounded-full border border-slate-800">
-                      {t.text}
-                    </span>
-                  ) : (
-                    <div
-                      className={`max-w-[85%] rounded-xl px-3 py-2 text-xs ${
-                        t.role === 'user'
-                          ? 'bg-indigo-600/25 border border-indigo-500/40 text-indigo-100 rounded-tr-none'
-                          : 'bg-slate-900 border border-slate-800 text-slate-200 rounded-tl-none'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2 mb-0.5 text-[10px] text-slate-400 font-semibold">
-                        <span>{t.role === 'user' ? 'You' : 'Gemini 3.8 Live'}</span>
-                        <span className="font-normal opacity-70">{t.timestamp}</span>
-                      </div>
-                      <p className="leading-relaxed whitespace-pre-wrap">{t.text}</p>
-                    </div>
-                  )}
+          <div className="space-y-3">
+            <div className="max-h-96 overflow-y-auto space-y-2.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+              {transcripts.length === 0 ? (
+                <div className="text-center py-6 text-slate-500 space-y-1">
+                  <Radio className="w-6 h-6 mx-auto text-slate-600 stroke-1" />
+                  <p>No chat or voice exchanges yet.</p>
+                  <p className="text-[11px] text-slate-600">
+                    Type a street address or coordinates below, or click "Start Live Call" to speak directly with Gemini 3.8 Live.
+                  </p>
                 </div>
-              ))
-            )}
-            <div ref={transcriptEndRef} />
+              ) : (
+                transcripts.map((t) => (
+                  <div
+                    key={t.id}
+                    className={`flex flex-col ${
+                      t.role === 'user'
+                        ? 'items-end'
+                        : t.role === 'model'
+                        ? 'items-start'
+                        : 'items-center'
+                    }`}
+                  >
+                    {t.role === 'system' ? (
+                      <span className="text-[11px] text-slate-500 italic bg-slate-900/60 px-2 py-0.5 rounded-full border border-slate-800 my-1">
+                        {t.text}
+                      </span>
+                    ) : (
+                      <div
+                        className={`w-full max-w-[95%] rounded-xl px-3.5 py-2.5 text-xs ${
+                          t.role === 'user'
+                            ? 'bg-indigo-600/25 border border-indigo-500/40 text-indigo-100 rounded-tr-none ml-auto'
+                            : 'bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-none mr-auto'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1 text-[10px] text-slate-400 font-semibold">
+                          <span className="flex items-center gap-1">
+                            {t.role === 'user' ? 'You' : 'Gemini 3.8 Live & OSIRIS Agent'}
+                          </span>
+                          <span className="font-normal opacity-70">{t.timestamp}</span>
+                        </div>
+                        <p className="leading-relaxed whitespace-pre-wrap">{t.text}</p>
+
+                        {/* Interactive Location Lock Card with Bi-Temporal Selection & Google Maps / OSIRIS layers */}
+                        {t.locationLock && (
+                          <div className="w-full mt-3 text-left">
+                            <LocationLockCard
+                              locationData={t.locationLock}
+                              isExecuting={isExecutingBiTemporal}
+                              onExecute={(loc, t1, t2, layer, tmpl) => {
+                                setIsExecutingBiTemporal(true);
+                                try {
+                                  if (onExecuteBiTemporal) {
+                                    onExecuteBiTemporal(loc, t1, t2, layer, tmpl);
+                                  }
+                                  const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                  setTranscripts((prev) => [
+                                    ...prev,
+                                    {
+                                      id: String(Date.now()),
+                                      role: 'system',
+                                      text: `🚀 Loading co-registered Sentinel-2 Optical (T1: ${t1}) and Sentinel-1 SAR (T2: ${t2}) comparison rasters for ${loc.formattedAddress}. Running bi-temporal change algorithms...`,
+                                      timestamp: nowTime,
+                                    },
+                                    {
+                                      id: String(Date.now() + 1),
+                                      role: 'model',
+                                      text: `✅ Co-registered Sentinel rasters loaded into dashboard. Comparing baseline T1 (${t1}) with comparison T2 (${t2}) to detect land cover shift, flood extent, and microwave radar backscatter variance.`,
+                                      timestamp: nowTime,
+                                    },
+                                  ]);
+                                } finally {
+                                  setTimeout(() => setIsExecutingBiTemporal(false), 2000);
+                                }
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+              <div ref={transcriptEndRef} />
+            </div>
+
+            {/* Interactive Chat Input Bar with Location Interceptor */}
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendChatMessage(chatInputText);
+                  setChatInputText('');
+                }}
+                className="flex items-center gap-2"
+              >
+                <div className="relative flex-1">
+                  <input
+                    type="text"
+                    value={chatInputText}
+                    onChange={(e) => setChatInputText(e.target.value)}
+                    placeholder="Type an address or coordinates (e.g. 1600 Amphitheatre Pkwy or 37.422, -122.084)..."
+                    className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 pr-12 font-sans"
+                  />
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] text-slate-500 font-mono">
+                    <span className="hidden sm:inline">Enter ↵</span>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!chatInputText.trim() || isResolvingLocation}
+                  className="px-3.5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white transition flex items-center justify-center cursor-pointer shadow-md shadow-indigo-950/40"
+                  title="Send message or trigger location lock"
+                >
+                  {isResolvingLocation ? (
+                    <Crosshair className="w-4 h-4 animate-spin text-white" />
+                  ) : (
+                    <Send className="w-4 h-4 text-white" />
+                  )}
+                </button>
+              </form>
+
+              {/* Quick Location Shortcuts */}
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="text-slate-500 flex items-center gap-1 text-[10px] uppercase font-semibold">
+                  <MapPin className="w-3 h-3 text-emerald-400" />
+                  Location Lock Shortcuts:
+                </span>
+                {[
+                  { label: '📍 1600 Amphitheatre Pkwy', val: '1600 Amphitheatre Pkwy, Mountain View, CA' },
+                  { label: '🌐 37.7749, -122.4194 (SF)', val: '37.7749, -122.4194' },
+                  { label: '🌊 25.7617, -80.1918 (Miami)', val: '25.7617, -80.1918' },
+                  { label: '🚢 Suez Canal', val: 'Suez Canal, Egypt' },
+                ].map((shortcut) => (
+                  <button
+                    key={shortcut.label}
+                    type="button"
+                    onClick={() => {
+                      setChatInputText(shortcut.val);
+                      handleSendChatMessage(shortcut.val);
+                    }}
+                    className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 hover:border-slate-700 transition cursor-pointer text-[10px]"
+                  >
+                    {shortcut.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

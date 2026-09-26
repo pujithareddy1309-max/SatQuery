@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Terminal, Copy, CheckCircle2, ChevronRight, ChevronDown, Check, AlertCircle } from 'lucide-react';
+import { Terminal, Copy, CheckCircle2, ChevronRight, ChevronDown, ChevronUp, Check, AlertCircle } from 'lucide-react';
 import { AgentTrace } from '../types';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ExecutionTraceProps {
   trace: AgentTrace | null;
@@ -10,6 +11,7 @@ export const ExecutionTrace: React.FC<ExecutionTraceProps> = ({ trace }) => {
   const [viewMode, setViewMode] = useState<'timeline' | 'json'>('timeline');
   const [copied, setCopied] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState<Record<number, boolean>>({});
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   if (!trace) return null;
 
@@ -74,11 +76,56 @@ export const ExecutionTrace: React.FC<ExecutionTraceProps> = ({ trace }) => {
               </>
             )}
           </button>
+
+          {/* Chevron Collapse Toggle (keyboard_arrow_up / keyboard_arrow_down) */}
+          <button
+            type="button"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            aria-expanded={!isCollapsed}
+            className={`p-1.5 rounded-lg border transition-all cursor-pointer flex items-center justify-center ${
+              isCollapsed
+                ? 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-emerald-400'
+                : 'bg-slate-800/60 hover:bg-slate-800 border-slate-700/80 text-slate-400 hover:text-white'
+            }`}
+            title={
+              isCollapsed
+                ? 'Expand execution trace (keyboard_arrow_down)'
+                : 'Collapse execution trace (keyboard_arrow_up)'
+            }
+          >
+            {isCollapsed ? (
+              <ChevronDown className="w-4 h-4" />
+            ) : (
+              <ChevronUp className="w-4 h-4" />
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="p-4">
+      <AnimatePresence initial={false}>
+        {!isCollapsed && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{
+              height: 'auto',
+              opacity: 1,
+              transition: {
+                height: { duration: 0.28, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.2, ease: 'easeOut' },
+              },
+            }}
+            exit={{
+              height: 0,
+              opacity: 0,
+              transition: {
+                height: { duration: 0.22, ease: [0.16, 1, 0.3, 1] },
+                opacity: { duration: 0.15, ease: 'easeIn' },
+              },
+            }}
+            className="overflow-hidden"
+          >
+            {/* Content */}
+            <div className="p-4">
         {viewMode === 'timeline' ? (
           <div className="space-y-3">
             {trace.steps.map((step, idx) => {
@@ -171,6 +218,9 @@ export const ExecutionTrace: React.FC<ExecutionTraceProps> = ({ trace }) => {
           </pre>
         )}
       </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
