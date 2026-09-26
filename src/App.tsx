@@ -11,7 +11,7 @@ import { ExecutionTrace } from './components/ExecutionTrace';
 import { AppTour } from './components/AppTour';
 import { BatchProcessingModal } from './components/BatchProcessingModal';
 import { BatchProcessingCard } from './components/BatchProcessingCard';
-import { AgentResult, OperationalTemplate, RasterScene, LocationLockData } from './types';
+import { AgentResult, ExplanationComplexity, OperationalTemplate, RasterScene, LocationLockData } from './types';
 import { generateDemoScene, generateBiTemporalLocationScenes } from './satquery/demo';
 import { runAgent } from './satquery/agent';
 
@@ -35,6 +35,7 @@ export const App: React.FC = () => {
   const [isGalaxyCollapsed, setIsGalaxyCollapsed] = useState(false);
   const [activeLocationLock, setActiveLocationLock] = useState<LocationLockData | null>(null);
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [complexity, setComplexity] = useState<ExplanationComplexity>('simple');
 
   // Helper to fetch grounding from server
   const fetchGrounding = async (
@@ -87,11 +88,12 @@ export const App: React.FC = () => {
     sarPair: boolean,
     q: string,
     tmpl: OperationalTemplate,
-    activeGrounding: 'none' | 'search' | 'maps' = groundingType
+    activeGrounding: 'none' | 'search' | 'maps' = groundingType,
+    activeComplexity: ExplanationComplexity = complexity
   ) => {
     setIsLoading(true);
     try {
-      const res = await runAgent(q, s1, s2, sarPair, tmpl);
+      const res = await runAgent(q, s1, s2, sarPair, tmpl, activeComplexity);
 
       // If Grounding is active, retrieve real-world Search or Maps context
       if (activeGrounding !== 'none') {
@@ -114,7 +116,12 @@ export const App: React.FC = () => {
   };
 
   const handleRun = () => {
-    executePipeline(scene1, scene2, isSar, query, template, groundingType);
+    executePipeline(scene1, scene2, isSar, query, template, groundingType, complexity);
+  };
+
+  const handleComplexityChange = (newComplexity: ExplanationComplexity) => {
+    setComplexity(newComplexity);
+    executePipeline(scene1, scene2, isSar, query, template, groundingType, newComplexity);
   };
 
   const handleSelectPreset = (presetName: string) => {
@@ -319,83 +326,87 @@ export const App: React.FC = () => {
         onOpenBatchProcessing={() => setIsBatchModalOpen(true)}
       />
 
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 lg:p-8 space-y-6">
-        {/* Top Section: Imagery & Controls */}
-        <div className="space-y-4">
-          <ImagePanel
-            scene1={scene1}
-            scene2={scene2}
-            onScene1Change={setScene1}
-            onScene2Change={setScene2}
-            isSar={isSar}
-            onSarChange={setIsSar}
-            sample1Key={sample1Key}
-            sample2Key={sample2Key}
-            onSample1Select={handleSample1Select}
-            onSample2Select={handleSample2Select}
-          />
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 lg:p-8">
+        {/* Two-Column Dashboard Layout: Left = Controls & Imagery, Right = Pinned AI Chatbox */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] xl:grid-cols-[1fr_460px] gap-6">
+          {/* Left Column: Imagery, Controls, Results */}
+          <div className="space-y-6 min-w-0">
+            <ImagePanel
+              scene1={scene1}
+              scene2={scene2}
+              onScene1Change={setScene1}
+              onScene2Change={setScene2}
+              isSar={isSar}
+              onSarChange={setIsSar}
+              sample1Key={sample1Key}
+              sample2Key={sample2Key}
+              onSample1Select={handleSample1Select}
+              onSample2Select={handleSample2Select}
+            />
 
-          <Controls
-            template={template}
-            onTemplateChange={setTemplate}
-            query={query}
-            onQueryChange={setQuery}
-            opacity={opacity}
-            onOpacityChange={setOpacity}
-            onRun={handleRun}
-            isLoading={isLoading}
-            onLoadExample={handleLoadExample}
-            groundingType={groundingType}
-            onGroundingTypeChange={setGroundingType}
-            onFetchGrounding={handleManualGrounding}
-            isGroundingLoading={isGroundingLoading}
-            onOpenBatchProcessing={() => setIsBatchModalOpen(true)}
-            onLocationLock={setActiveLocationLock}
-          />
+            <Controls
+              template={template}
+              onTemplateChange={setTemplate}
+              query={query}
+              onQueryChange={setQuery}
+              opacity={opacity}
+              onOpacityChange={setOpacity}
+              onRun={handleRun}
+              isLoading={isLoading}
+              onLoadExample={handleLoadExample}
+              groundingType={groundingType}
+              onGroundingTypeChange={setGroundingType}
+              onFetchGrounding={handleManualGrounding}
+              isGroundingLoading={isGroundingLoading}
+              onOpenBatchProcessing={() => setIsBatchModalOpen(true)}
+              onLocationLock={setActiveLocationLock}
+              complexity={complexity}
+              onComplexityChange={handleComplexityChange}
+            />
 
-          {/* Batch Coordinate Bi-Temporal Processing Card */}
-          <BatchProcessingCard
-            onInspectItemInDashboard={handleInspectBatchItem}
-            onOpenModal={() => setIsBatchModalOpen(true)}
-          />
-        </div>
+            {/* Batch Coordinate Bi-Temporal Processing Card */}
+            <BatchProcessingCard
+              onInspectItemInDashboard={handleInspectBatchItem}
+              onOpenModal={() => setIsBatchModalOpen(true)}
+            />
 
-        {/* Results Section */}
-        <div className="space-y-6">
-          {/* Real-time Voice Conversation with Gemini 3.8 Live & Location Interception */}
-          <LiveVoiceConversation
-            result={result}
-            scene1={scene1}
-            scene2={scene2}
-            query={query}
-            onExecuteBiTemporal={handleExecuteLocationBiTemporal}
-            activeLocationLock={activeLocationLock}
-            onLocationLockChange={setActiveLocationLock}
-          />
+            <VisualEvidence
+              result={result}
+              scene1={scene1}
+              scene2={scene2}
+              opacity={opacity}
+              template={template}
+            />
 
-          <VisualEvidence
-            result={result}
-            scene1={scene1}
-            scene2={scene2}
-            opacity={opacity}
-            template={template}
-          />
+            {/* Audio Explanation with Language and Jargon/Simple Options */}
+            <AudioExplanation
+              result={result}
+              scene1={scene1}
+              scene2={scene2}
+              query={query}
+            />
 
-          {/* Audio Explanation with Language and Jargon/Simple Options */}
-          <AudioExplanation
-            result={result}
-            scene1={scene1}
-            scene2={scene2}
-            query={query}
-          />
+            <FindingsExport
+              result={result}
+              scene1={scene1}
+              scene2={scene2}
+            />
 
-          <FindingsExport
-            result={result}
-            scene1={scene1}
-            scene2={scene2}
-          />
+            <ExecutionTrace trace={result?.trace || null} />
+          </div>
 
-          <ExecutionTrace trace={result?.trace || null} />
+          {/* Right Column: Pinned AI Chatbox (stays visible while scrolling results) */}
+          <div className="lg:sticky lg:top-20 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+            <LiveVoiceConversation
+              result={result}
+              scene1={scene1}
+              scene2={scene2}
+              query={query}
+              onExecuteBiTemporal={handleExecuteLocationBiTemporal}
+              activeLocationLock={activeLocationLock}
+              onLocationLockChange={setActiveLocationLock}
+            />
+          </div>
         </div>
       </main>
 

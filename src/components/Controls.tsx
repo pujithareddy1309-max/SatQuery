@@ -15,8 +15,10 @@ import {
   X,
   CornerDownLeft,
   FileSpreadsheet,
+  BookOpen,
+  Microscope,
 } from 'lucide-react';
-import { OperationalTemplate, LocationLockData } from '../types';
+import { OperationalTemplate, LocationLockData, ExplanationComplexity } from '../types';
 import { CollapsibleCard } from './CollapsibleCard';
 import { detectLocationString, resolveLocationLock } from '../satquery/geocoder';
 
@@ -36,6 +38,8 @@ interface ControlsProps {
   isGroundingLoading: boolean;
   onOpenBatchProcessing?: () => void;
   onLocationLock?: (loc: LocationLockData) => void;
+  complexity?: ExplanationComplexity;
+  onComplexityChange?: (complexity: ExplanationComplexity) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -54,6 +58,8 @@ export const Controls: React.FC<ControlsProps> = ({
   isGroundingLoading,
   onOpenBatchProcessing,
   onLocationLock,
+  complexity = 'simple',
+  onComplexityChange,
 }) => {
   // Audio transcription state
   const [isRecording, setIsRecording] = useState(false);
@@ -256,6 +262,47 @@ export const Controls: React.FC<ControlsProps> = ({
           ))}
         </div>
       </div>
+
+      {/* Complexity / Jargon Toggle */}
+      {onComplexityChange && (
+        <div>
+          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+            Explanation Complexity
+          </label>
+          <div className="grid grid-cols-2 gap-2 max-w-md">
+            <button
+              type="button"
+              onClick={() => onComplexityChange('simple')}
+              className={`flex items-start gap-2 p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                complexity === 'simple'
+                  ? 'bg-emerald-500/15 border-emerald-500/50 text-white ring-1 ring-emerald-500/30'
+                  : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <BookOpen className={`w-3.5 h-3.5 mt-0.5 ${complexity === 'simple' ? 'text-emerald-400' : 'text-slate-400'}`} />
+              <div>
+                <div className="text-xs font-semibold">Simple (Everyday)</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">Plain language, no jargon</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onComplexityChange('technical')}
+              className={`flex items-start gap-2 p-2.5 rounded-lg border text-left transition cursor-pointer ${
+                complexity === 'technical'
+                  ? 'bg-indigo-500/15 border-indigo-500/50 text-white ring-1 ring-indigo-500/30'
+                  : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Microscope className={`w-3.5 h-3.5 mt-0.5 ${complexity === 'technical' ? 'text-indigo-400' : 'text-slate-400'}`} />
+              <div>
+                <div className="text-xs font-semibold">Technical Jargon</div>
+                <div className="text-[10px] text-slate-400 mt-0.5">NDVI, NDWI, NDBI, SAR backscatter</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Query Input with Microphone Transcription & Grounding Options */}
       <div>

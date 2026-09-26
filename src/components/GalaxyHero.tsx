@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { motion, useScroll, useMotionValueEvent } from 'framer-motion';
 import {
   Satellite,
@@ -60,32 +64,22 @@ function createSimpleEarthTexture(): THREE.CanvasTexture {
   };
 
   // Major Continents & Landmasses
-  // North America
   drawLand([[-165, 68], [-140, 58], [-122, 38], [-105, 20], [-80, 25], [-65, 45], [-80, 65], [-140, 70]], '#1b4d3e');
-  // Greenland
   drawLand([[-50, 62], [-20, 75], [-35, 83], [-55, 78]], '#e2e8f0');
-  // South America
   drawLand([[-80, 8], [-35, -5], [-45, -24], [-68, -52], [-75, -45], [-80, -2]], '#14532d');
-  // Europe
   drawLand([[-10, 36], [0, 50], [15, 65], [30, 60], [25, 40], [0, 38]], '#1e5237');
-  // Africa
   drawLand([[-17, 32], [32, 30], [50, 10], [35, -20], [20, -34], [10, -5], [-15, 12]], '#92400e');
-  // Central Africa Green Belt
   drawLand([[8, 5], [30, 5], [35, -15], [12, -15]], '#166534');
-  // Asia
   drawLand([[35, 65], [100, 72], [165, 65], [140, 40], [105, 20], [75, 12], [45, 30]], '#1c4d37');
-  // India
   drawLand([[68, 24], [78, 28], [82, 10], [77, 8]], '#a16207');
-  // Australia
   drawLand([[115, -20], [145, -15], [150, -35], [120, -35]], '#c2410c');
-  // Antarctica
   drawLand([[-180, -75], [0, -70], [180, -75], [180, -90], [-180, -90]], '#f1f5f9');
 
   // Major glowing city lights on dark side
   const cities: [number, number][] = [
     [-74, 40.7], [-118.2, 34], [-0.1, 51.5], [2.3, 48.8],
     [139.7, 35.6], [121.4, 31.2], [77.2, 28.6], [55.3, 25.2],
-    [-46.6, -23.5], [151.2, -33.8]
+    [-46.6, -23.5], [151.2, -33.8],
   ];
   cities.forEach(([lon, lat]) => {
     ctx.fillStyle = '#fef08a';
@@ -156,9 +150,15 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
   });
 
   const { scrollY } = useScroll();
+  const scrollProgressRef = useRef(0);
 
   useMotionValueEvent(scrollY, 'change', (latest) => {
-    if (latest > 25 && !isCollapsed) {
+    // Map scroll position 0..400px to a 0..1 progress value for camera interpolation
+    const progress = Math.min(1, latest / 400);
+    scrollProgressRef.current = progress;
+
+    // Auto-collapse once the user has scrolled past ~75% of the hero
+    if (latest > 300 && !isCollapsed) {
       onToggleCollapse();
     }
   });
@@ -176,7 +176,7 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  // Three.js Lightweight Scene
+  // Three.js Cinematic Scene with Postprocessing
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -186,10 +186,11 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
 
     // 1. Scene & Camera
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 2000);
+    // Start at wide galaxy view
     camera.position.set(0, 2.2, 13.5);
 
-    // 2. WebGL Renderer
+    // 2. WebGL Renderer with ACES tone mapping for cinematic look
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: true,
@@ -197,19 +198,23 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
     container.appendChild(renderer.domElement);
 
-    // 3. Crisp Starfield Background
-    const starsCount = 2000;
+    // 3. 5,000-Star Starfield Particle System
+    const starsCount = 5000;
     const starGeometry = new THREE.BufferGeometry();
     const starPositions = new Float32Array(starsCount * 3);
     const starColors = new Float32Array(starsCount * 3);
+    const starSizes = new Float32Array(starsCount);
 
     const colors = [
       new THREE.Color('#ffffff'),
       new THREE.Color('#93c5fd'),
       new THREE.Color('#38bdf8'),
       new THREE.Color('#fef08a'),
+      new THREE.Color('#fbbf24'),
     ];
 
     for (let i = 0; i < starsCount; i++) {
@@ -225,16 +230,46 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
       starColors[i * 3] = col.r;
       starColors[i * 3 + 1] = col.g;
       starColors[i * 3 + 2] = col.b;
+
+      // Vary star sizes for depth perception
+      starSizes[i] = 0.5 + Math.random() * 2.0;
     }
 
     starGeometry.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
     starGeometry.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+    starGeometry.setAttribute('size', new THREE.BufferAttribute(starSizes, 1));
 
-    const starMaterial = new THREE.PointsMaterial({
-      size: 1.5,
-      vertexColors: true,
+    // Custom shader material for crisp round stars with soft glow
+    const starMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+      },
+      vertexShader: `
+        attribute float size;
+        attribute vec3 color;
+        varying vec3 vColor;
+        uniform float uTime;
+        void main() {
+          vColor = color;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          // Twinkle effect
+          float twinkle = 0.7 + 0.3 * sin(uTime * 2.0 + position.x * 0.1 + position.y * 0.05);
+          gl_PointSize = size * twinkle * (300.0 / -mvPosition.z);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vColor;
+        void main() {
+          float d = length(gl_PointCoord - vec2(0.5));
+          if (d > 0.5) discard;
+          float alpha = smoothstep(0.5, 0.0, d);
+          gl_FragColor = vec4(vColor, alpha);
+        }
+      `,
       transparent: true,
-      opacity: 0.9,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
     const starfield = new THREE.Points(starGeometry, starMaterial);
     scene.add(starfield);
@@ -254,34 +289,37 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
 
     const earthRadius = 4.0;
 
-    // Standard Textured Earth Mesh
+    // Standard Textured Earth Mesh with higher geometry detail for crisp shading
     const earthTexture = createSimpleEarthTexture();
     const earthMaterial = new THREE.MeshStandardMaterial({
       map: earthTexture,
       roughness: 0.6,
       metalness: 0.1,
+      emissive: new THREE.Color(0x0a1a2a),
+      emissiveIntensity: 0.15,
     });
     const earthMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(earthRadius, 48, 48),
+      new THREE.SphereGeometry(earthRadius, 64, 64),
       earthMaterial
     );
     earthGroup.add(earthMesh);
 
-    // Wispy Cloud Layer
+    // Wispy Cloud Layer with faster rotation
     const cloudsTexture = createSimpleCloudsTexture();
     const cloudMaterial = new THREE.MeshStandardMaterial({
       map: cloudsTexture,
       transparent: true,
       opacity: 0.55,
       blending: THREE.AdditiveBlending,
+      depthWrite: false,
     });
     const cloudsMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(earthRadius + 0.05, 36, 36),
+      new THREE.SphereGeometry(earthRadius + 0.05, 48, 48),
       cloudMaterial
     );
     earthGroup.add(cloudsMesh);
 
-    // Gentle Atmospheric Glow Rim
+    // Gentle Atmospheric Glow Rim with refined shader
     const atmosphereMaterial = new THREE.ShaderMaterial({
       vertexShader: `
         varying vec3 vNormal;
@@ -300,9 +338,10 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
       blending: THREE.AdditiveBlending,
       side: THREE.BackSide,
       transparent: true,
+      depthWrite: false,
     });
     const atmosphereMesh = new THREE.Mesh(
-      new THREE.SphereGeometry(earthRadius + 0.22, 36, 36),
+      new THREE.SphereGeometry(earthRadius + 0.22, 48, 48),
       atmosphereMaterial
     );
     earthGroup.add(atmosphereMesh);
@@ -325,13 +364,13 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
     const satGroup = new THREE.Group();
     const satBody = new THREE.Mesh(
       new THREE.BoxGeometry(0.22, 0.16, 0.16),
-      new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.8 })
+      new THREE.MeshStandardMaterial({ color: 0xf59e0b, metalness: 0.8, roughness: 0.3 })
     );
     satGroup.add(satBody);
 
     const solarWing = new THREE.Mesh(
       new THREE.BoxGeometry(0.7, 0.02, 0.14),
-      new THREE.MeshStandardMaterial({ color: 0x1e3a8a })
+      new THREE.MeshStandardMaterial({ color: 0x1e3a8a, metalness: 0.6, roughness: 0.3 })
     );
     solarWing.position.x = 0.42;
     satGroup.add(solarWing);
@@ -342,11 +381,36 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
 
     earthGroup.add(satGroup);
 
-    // 6. Interactive Mouse Parallax & Animation Loop
+    // 6. Postprocessing: EffectComposer with UnrealBloomPass
+    const composer = new EffectComposer(renderer);
+    composer.setSize(width, height);
+
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+
+    // Tuned UnrealBloomPass: enough glow for cinematic feel, not blinding
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(width, height),
+      0.45,  // strength: moderate, avoids overexposure
+      0.6,   // radius: soft spread
+      0.7    // threshold: only bright elements bloom
+    );
+    composer.addPass(bloomPass);
+
+    const outputPass = new OutputPass();
+    composer.addPass(outputPass);
+
+    // 7. Interactive Mouse Parallax & Animation Loop
     let mouseX = 0;
     let mouseY = 0;
     let targetCameraX = 0;
     let targetCameraY = 2.2;
+
+    // Camera keyframes for scroll-triggered interpolation
+    // Wide galaxy view → focused orbital Earth view
+    const cameraWide = { x: 0, y: 2.2, z: 13.5, lookAt: new THREE.Vector3(1.2, 0, 0) };
+    const cameraFocus = { x: 1.8, y: 0.5, z: 8.5, lookAt: new THREE.Vector3(3.2, -0.2, 0) };
+    let currentScrollProgress = 0;
 
     const handleMouseMove = (e: MouseEvent) => {
       const normX = (e.clientX / window.innerWidth) * 2 - 1;
@@ -363,19 +427,28 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height);
+      composer.setSize(width, height);
+      bloomPass.setSize(width, height);
     };
     window.addEventListener('resize', handleResize);
 
     let animationFrameId: number;
     let satAngle = 0;
+    const clock = new THREE.Clock();
+
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
+      const elapsed = clock.getElapsedTime();
 
       // Clean Gentle Planetary & Cloud Rotations
       earthMesh.rotation.y += 0.0012;
       cloudsMesh.rotation.y += 0.0018;
       starfield.rotation.y += 0.0001;
+
+      // Update star twinkle
+      starMaterial.uniforms.uTime.value = elapsed;
 
       // Orbit Satellite
       satAngle += 0.012;
@@ -387,14 +460,35 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
       satGroup.position.copy(satPos);
       satGroup.lookAt(earthMesh.position);
 
-      // Smooth Parallax Easing
-      targetCameraX = mouseX * 1.2;
-      targetCameraY = 2.2 + mouseY * 0.6;
+      // Smooth scroll-triggered camera interpolation
+      const targetProgress = scrollProgressRef.current;
+      currentScrollProgress += (targetProgress - currentScrollProgress) * 0.06;
+
+      const p = currentScrollProgress;
+      // Ease in-out for butter-smooth transition
+      const easedP = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+
+      const baseX = lerp(cameraWide.x, cameraFocus.x, easedP);
+      const baseY = lerp(cameraWide.y, cameraFocus.y, easedP);
+      const baseZ = lerp(cameraWide.z, cameraFocus.z, easedP);
+
+      // Add mouse parallax on top of scroll interpolation
+      targetCameraX = baseX + mouseX * 1.2 * (1 - easedP * 0.5);
+      targetCameraY = baseY + mouseY * 0.6 * (1 - easedP * 0.5);
+
       camera.position.x += (targetCameraX - camera.position.x) * 0.05;
       camera.position.y += (targetCameraY - camera.position.y) * 0.05;
-      camera.lookAt(1.2, 0, 0);
+      camera.position.z += (baseZ - camera.position.z) * 0.05;
 
-      renderer.render(scene, camera);
+      // Smoothly interpolate lookAt target
+      const lookTarget = new THREE.Vector3(
+        lerp(cameraWide.lookAt.x, cameraFocus.lookAt.x, easedP),
+        lerp(cameraWide.lookAt.y, cameraFocus.lookAt.y, easedP),
+        lerp(cameraWide.lookAt.z, cameraFocus.lookAt.z, easedP)
+      );
+      camera.lookAt(lookTarget);
+
+      composer.render();
     };
 
     animate();
@@ -407,6 +501,8 @@ export const GalaxyHero: React.FC<GalaxyHeroProps> = ({
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
+      composer.dispose();
+      bloomPass.dispose();
       renderer.dispose();
       starGeometry.dispose();
       starMaterial.dispose();

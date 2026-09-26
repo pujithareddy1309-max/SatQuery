@@ -2,6 +2,7 @@ import {
   AgentResult,
   AgentTrace,
   BoundingBox,
+  ExplanationComplexity,
   IndexSummary,
   MasksMap,
   OperationalTemplate,
@@ -135,7 +136,8 @@ export async function runAgent(
   scene1: RasterScene,
   scene2?: RasterScene | null,
   isSarPair = false,
-  template?: OperationalTemplate | null
+  template?: OperationalTemplate | null,
+  complexity: ExplanationComplexity = 'simple'
 ): Promise<AgentResult> {
   const startTime = performance.now();
   const timestamp = new Date().toISOString();
@@ -350,8 +352,12 @@ export async function runAgent(
   if (!indices.ndwi) indices.ndwi = computeIndex(targetScene, 'ndwi');
   if (!indices.ndbi) indices.ndbi = computeIndex(targetScene, 'ndbi');
 
+  // Synthesize final answer based on complexity mode
+  const rawAnswer = answers.join('\n\n');
+  const finalAnswer = synthesizeAnswer(rawAnswer, complexity, coverage, indices, dominantChange, scene2, isSarPair);
+
   return {
-    answer: answers.join('\n\n'),
+    answer: finalAnswer,
     annotatedImageUrl,
     masks: currentMasks,
     boxes: currentBoxes,
@@ -363,5 +369,93 @@ export async function runAgent(
     blendDataUrl,
     dominantChange,
     indices,
+    complexity,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Synthesize complexity-aware answer text
+// ---------------------------------------------------------------------------
+function synthesizeAnswer(
+  rawAnswer: string,
+  complexity: ExplanationComplexity,
+  coverage: { class: string; percentage: number; hectares: number; color: string }[],
+  indices: { ndvi?: IndexSummary; ndwi?: IndexSummary; ndbi?: IndexSummary },
+  dominantChange?: string,
+  hasScene2?: boolean,
+  isSarPair?: boolean
+): string {
+  if (complexity === 'technical') {
+    const lines: string[] = [];
+
+    // Spectral indices breakdown
+    if (indices.ndvi) {
+      lines.push(
+        `NDVI (Sentinel-2, NIR-SWIR normalized): mean=${indices.ndvi.mean.toFixed(4)}, positive pixel fraction=${indices.ndvi.positivePct.toFixed(1)}%, threshold=${indices.ndvi.threshold.toFixed(2)}, vegetated area=${indices.ndvi.areaHectares} ha. Method: ${indices.ndvi.method}.`
+      );
+    }
+    if (indices.ndwi) {
+      lines.push(
+        `NDWI (McFeeters, Green-NIR): mean=${indices.ndwi.mean.toFixed(4)}, water pixel fraction=${indices.ndwi.positivePct.toFixed(1)}%, threshold=${indices.ndwi.threshold.toFixed(2)}, water surface area=${indices.ndwi.areaHectares} ha. Method: ${indices.ndwi.method}.`
+      );
+    }
+    if (indices.ndbi) {
+      lines.push(
+        `NDBI (SWIR-NIR normalized): mean=${indices.ndbi.mean.toFixed(4)}, built-up pixel fraction=${indices.ndbi.positivePct.toFixed(1)}%, threshold=${indices.ndbi.threshold.toFixed(2)}, impervious surface area=${indices.ndbi.areaHectares} ha. Method: ${indices.ndbi.method}.`
+      );
+    }
+
+    // Quantitative pixel breakdown
+    const pixelLines = coverage.map(
+      (c) => `  • ${c.class}: ${c.percentage}% (${c.pixels} px, ${c.hectares} ha)`
+    );
+    if (pixelLines.length > 0) {
+      lines.push(`Pixel-level spectral classification breakdown:\n${pixelLines.join('\n')}`);
+    }
+
+    // SAR backscatter metrics
+    if (isSarPair) {
+      lines.push(
+        `SAR radar backscatter: Sentinel-1 C-band (5.405 GHz, VV+VH polarization). Cross-attention fusion of optical MSI bands (B02/B03/B04/B08/B11) with SAR intensity channels. Backscatter variance computed over co-registered slant-range geometry.`
+      );
+    }
+
+    // Bi-temporal change
+    if (hasScene2 && dominantChange) {
+      lines.push(`Dominant bi-temporal change class: ${dominantChange}. Co-registered T1→T2 semantic shift computed via per-class delta of spectral masks.`);
+    }
+
+    // Include raw tool trace
+    lines.push(`\nTool execution trace:\n${rawAnswer}`);
+
+    return lines.join('\n\n');
+  } else {
+    // Simple mode: plain language, no jargon
+    const lines: string[] = [];
+
+    const waterPct = coverage.find((c) => c.class.toLowerCase().includes('water'))?.percentage;
+    const vegPct = coverage.find((c) => c.class.toLowerCase().includes('veget') || c.class.toLowerCase().includes('forest'))?.percentage;
+    const builtPct = coverage.find((c) => c.class.toLowerCase().includes('built') || c.class.toLowerCase().includes('urban'))?.percentage;
+
+    const parts: string[] = [];
+    if (waterPct !== undefined) parts.push(`water covers about ${waterPct}%`);
+    if (vegPct !== undefined) parts.push(`green vegetation covers about ${vegPct}%`);
+    if (builtPct !== undefined) parts.push(`built-up areas cover about ${builtPct}%`);
+
+    if (parts.length > 0) {
+      lines.push(`Here's what I found in this satellite image: ${parts.join(', ')}.`);
+    }
+
+    if (hasScene2 && dominantChange) {
+      lines.push(`Comparing the two time periods, the biggest change I detected is ${dominantChange}.`);
+    }
+
+    if (isSarPair) {
+      lines.push(`I also combined the regular camera image with radar data to get a clearer picture through clouds and at night.`);
+    }
+
+    lines.push(`\n${rawAnswer.split('\n\n')[0]}`);
+
+    return lines.join('\n\n');
+  }
 }

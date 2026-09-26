@@ -120,6 +120,7 @@ export interface AgentResult {
     ndbi?: IndexSummary;
   };
   grounding?: GroundingData | null;
+  complexity?: ExplanationComplexity;
 }
 
 export type ExplanationComplexity = 'simple' | 'technical';
